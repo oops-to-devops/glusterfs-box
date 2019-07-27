@@ -1,0 +1,80 @@
+---
+- hosts: glusterfs_box
+  gather_facts: False
+
+  vars:
+    - root_dir: "{{ playbook_dir }}"
+    - shared_dir: "{{ playbook_dir }}/../shared"
+
+
+  vars_files:
+    - ./glusterfs_vars.yml
+
+  pre_tasks:
+    - debug: msg="Pre tasks section"
+      tags: always
+
+    - name: ANSIBLE PYTHON | install python 2
+      raw: test -e /usr/bin/python || (apt -qqy update && apt install -qy python-minimal)
+      become: yes
+      tags: always
+
+    - name:  UNPRIVILEGED USERS | Get acl dependency (ansible unprivileged user operations magic)
+      apt: pkg="acl"
+      become: yes
+      tags: always
+
+    - name: gather facts
+      setup:
+      tags: always
+
+    - name: Check for common pretasks
+      local_action: stat path="{{shared_dir}}/common_pretasks.yml"
+      register: common_pretasks_exists
+      tags: always
+
+    - name: Include common pretasks
+      include_tasks: "{{shared_dir}}/common_pretasks.yml"
+      when: common_pretasks_exists.stat.exists == true
+      tags: always
+
+  roles:
+
+     - {
+        role: "geerlingguy.glusterfs",
+        become: true,
+        tags: ["create", "glusterfs"]
+       }
+
+  tasks:
+
+    - debug: msg="Pre tasks section"
+
+  tasks:
+    - name: Ensure Gluster brick and mount directories exist.
+      file: "path={{ item }} state=directory mode=0775"
+      with_items:
+        - "{{ gluster_brick_dir }}"
+        - "{{ gluster_mount_dir }}"
+      become: yes
+
+    - name: Configure Gluster volume.
+      gluster_volume:
+        state: present
+        name: "{{ gluster_brick_name }}"
+        brick: "{{ gluster_brick_dir }}"
+        replicas: "{{ gluster_replica_count }}"
+        cluster: "{{ groups.glusterfs_box | join(',') }}"
+        host: "{{ inventory_hostname }}"
+        force: yes
+      run_once: true
+      become: yes
+
+    - name: Ensure Gluster volume is mounted.
+      mount:
+        name: "{{ gluster_mount_dir }}"
+        src: "{{ inventory_hostname }}:/{{ gluster_brick_name }}"
+        fstype: glusterfs
+        opts: "defaults,_netdev"
+        state: mounted
+      become: yes
