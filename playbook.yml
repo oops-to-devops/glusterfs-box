@@ -6,6 +6,8 @@
     - root_dir: "{{ playbook_dir }}"
     - shared_dir: "{{ playbook_dir }}/../shared"
 
+# ansible_enp0s3
+# ansible_enp0s8
 
   vars_files:
     - ./glusterfs_vars.yml
@@ -38,6 +40,9 @@
       when: common_pretasks_exists.stat.exists == true
       tags: always
 
+#ansible_enp0s3
+#ansible_enp0s8
+
   roles:
 
      - {
@@ -58,13 +63,15 @@
         - "{{ gluster_mount_dir }}"
       become: yes
 
+#    - debug: msg="{{ groups['glusterfs_box'] | map('extract', hostvars,  ['ansible_host']) | list  }}"
+
     - name: Configure Gluster volume.
       gluster_volume:
         state: present
         name: "{{ gluster_brick_name }}"
         brick: "{{ gluster_brick_dir }}"
         replicas: "{{ gluster_replica_count }}"
-        cluster: "{{ groups.glusterfs_box | join(',') }}"
+        cluster: "{{ groups['glusterfs_box'] | map('extract', hostvars,  ['ansible_host']) | list | join(',') }}"
         host: "{{ inventory_hostname }}"
         force: yes
       run_once: true
@@ -73,7 +80,7 @@
     - name: Ensure Gluster volume is mounted.
       mount:
         name: "{{ gluster_mount_dir }}"
-        src: "{{ inventory_hostname }}:/{{ gluster_brick_name }}"
+        src: "{{ ansible_host }}:/{{ gluster_brick_name }}"
         fstype: glusterfs
         opts: "defaults,_netdev"
         state: mounted
