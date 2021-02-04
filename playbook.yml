@@ -3,8 +3,8 @@
   gather_facts: False
 
   vars:
-    - root_dir: "{{ playbook_dir }}"
-    - shared_dir: "{{ playbook_dir }}/../shared"
+     root_dir: "{{ playbook_dir }}"
+     shared_dir: "{{ playbook_dir }}/../shared"
 
 # ansible_enp0s3
 # ansible_enp0s8
@@ -13,8 +13,11 @@
     - ./glusterfs_vars.yml
 
   pre_tasks:
-    - debug: msg="Pre tasks section"
-      tags: always
+    - name: debug
+      debug:
+        msg: "Pre tasks section"
+      tags:
+        - always
 
     - name: ANSIBLE PYTHON | install python 2
       raw: test -e /usr/bin/python || test -e /usr/bin/python3 || (apt -qqy update && apt install -qy python-minimal)
@@ -22,13 +25,16 @@
       tags: always
 
     - name:  UNPRIVILEGED USERS | Get acl dependency (ansible unprivileged user operations magic)
-      apt: pkg="acl"
+      apt:
+        pkg: acl
+        state: present
       become: yes
       tags: always
 
     - name: gather facts
       setup:
-      tags: always
+      tags:
+        - always
 
     - name: Check for common pretasks
       local_action: stat path="{{shared_dir}}/common_pretasks.yml"
@@ -55,15 +61,49 @@
 
     - debug: msg="Pre tasks section"
 
-  tasks:
     - name: Ensure Gluster brick and mount directories exist.
-      file: "path={{ item }} state=directory mode=0775"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0775
       with_items:
         - "{{ gluster_brick_dir }}"
         - "{{ gluster_mount_dir }}"
       become: yes
 
-#    - debug: msg="{{ groups['glusterfs_box'] | map('extract', hostvars,  ['ansible_host']) | list  }}"
+    - block:
+
+      - name: Detect glusterfs advertised ip address
+        set_fact:
+          gluster_master_address: "{{ item }}"
+        when: "item | ipaddr(gluster_address_mask)"
+        with_items: "{{ ansible_all_ipv4_addresses }}"
+
+      - set_fact:
+          gluster_target_interface: "{{ item }}"
+        when: >
+          (hostvars[inventory_hostname]['ansible_%s' % item]|default({}))
+          .get('ipv4', {}).get('address') == gluster_master_address
+          or
+          gluster_master_address in ((hostvars[inventory_hostname]['ansible_%s' % item]|default({}))
+          .get('ipv4_secondaries'))|map(attribute='address')|list
+        with_items:
+          - "{{ ansible_interfaces }}"
+
+      - debug:
+          msg: >-
+            found interface {{ gluster_target_interface }}
+            with address {{ gluster_master_address }}
+
+      when: gluster_address_mask is defined
+
+    - block:
+        - name: Detect gluster advertised ip address
+          set_fact:
+              gluster_master_address: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+      when: gluster_address_mask is not defined
+
+    - debug: msg="{{ groups['glusterfs_box'] | map('extract', hostvars,  ['gluster_master_address']) | list  }}"
 
     - name: Configure Gluster volume.
       gluster_volume:
@@ -71,7 +111,7 @@
         name: "{{ gluster_brick_name }}"
         brick: "{{ gluster_brick_dir }}"
         replicas: "{{ gluster_replica_count }}"
-        cluster: "{{ groups['glusterfs_box'] | map('extract', hostvars,  ['ansible_host']) | list | join(',') }}"
+        cluster: "{{ groups['glusterfs_box'] | map('extract', hostvars,  ['gluster_master_address']) | list | join(',') }}"
         host: "{{ inventory_hostname }}"
         force: yes
       run_once: true
@@ -80,7 +120,7 @@
     - name: Ensure Gluster volume is mounted.
       mount:
         name: "{{ gluster_mount_dir }}"
-        src: "{{ ansible_host }}:/{{ gluster_brick_name }}"
+        src: "{{ gluster_master_address }}:/{{ gluster_brick_name }}"
         fstype: glusterfs
         opts: "defaults,_netdev"
         state: mounted
