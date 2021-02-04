@@ -125,3 +125,28 @@
         opts: "defaults,_netdev"
         state: mounted
       become: yes
+
+    - name: Install glusterfs plugin
+      shell: docker plugin install --alias glusterfs trajano/glusterfs-volume-plugin:v2.0.3 --grant-all-permissions --disable
+      become: yes
+      ignore_errors: True
+      register: result
+      changed_when:
+        - '"already exists" in result.stderr'
+      when: option_install_docker_driver
+
+    - name: GlusterFS - disable plugin if enabled
+      shell: docker plugin disable glusterfs
+      ignore_errors: true
+      become: yes
+      when: option_install_docker_driver
+
+    - name: GlusterFS - configure servers
+      shell: docker plugin set glusterfs SERVERS={{ groups['glusterfs_box'] | map('extract', hostvars,  ['gluster_master_address']) | list | join(',') }}
+      become: yes
+      when: option_install_docker_driver
+
+    - name: GlusterFS - configure servers
+      shell: docker plugin enable glusterfs
+      become: yes
+      when: option_install_docker_driver
